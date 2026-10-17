@@ -2,15 +2,18 @@ import os
 import random
 import urllib.parse
 import requests
-from flask import Flask, render_template_string, request, jsonify, redirect
+from flask import Flask, render_template_string, request, jsonify, redirect, session
 from openpyxl import Workbook, load_workbook
 
 app = Flask(__name__)
+app.secret_key = "rider_secret_key_sonu_5067"  # Session security key
 
 APP_NAME = "Rider"
 OWNER_NAME = "Sonu Kumar"
 OWNER_WHATSAPP_NUMBER = "917294182077"
 OWNER_UPI_ID = "ssingh7479555065@oksbi"
+ADMIN_PASSWORD = "sonu5067"
+CAPTAIN_PASSWORD = "captain123"  # 👈 Captain ka Secret Password
 EXCEL_FILE = "rider_bookings.xlsx"
 CAPTAINS_FILE = "registered_captains.xlsx"
 
@@ -55,6 +58,50 @@ def save_to_excel(name, phone, pickup, drop, service, fare, payment_mode, captai
     ws.append([name, phone, pickup, drop, service, fare, payment_mode, captain, "Pending", otp, lat, lng, "Not Rated", coupon])
     wb.save(EXCEL_FILE)
     return ws.max_row - 2
+
+LOGIN_FORM_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login Access - Rider</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+        body { background-color: #030712; color: #f9fafb; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 15px; }
+        .login-card { background: #111827; border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 25px; width: 100%; max-width: 380px; text-align: center; }
+        h2 { color: #fbbf24; margin-bottom: 8px; }
+        p { font-size: 13px; color: #9ca3af; margin-bottom: 20px; }
+        input { width: 100%; padding: 12px; background: #030712; border: 1px solid #374151; border-radius: 8px; color: white; margin-bottom: 15px; font-size: 14px; outline: none; }
+        input:focus { border-color: #fbbf24; }
+        button { width: 100%; padding: 12px; background: #fbbf24; color: black; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
+        .error { color: #f87171; font-size: 12px; margin-bottom: 12px; }
+        a { color: #9ca3af; text-decoration: none; font-size: 12px; display: inline-block; margin-top: 15px; }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <h2>🔒 {{ role }} Authentication</h2>
+        <p>Restricted Area - Only Authorized Personnel</p>
+        
+        {% if error %}
+        <div class="error">❌ {{ error }}</div>
+        {% endif %}
+
+        <form method="POST">
+            {% if role == 'Captain' %}
+            <input type="tel" name="phone" placeholder="Enter Registered Mobile Number" required maxlength="10">
+            {% else %}
+            <input type="password" name="password" placeholder="Enter Admin Secret Password" required>
+            {% endif %}
+            <button type="submit">Unlock Dashboard 🔑</button>
+        </form>
+
+        <a href="/">⬅ Return to Customer App</a>
+    </div>
+</body>
+</html>
+"""
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -161,8 +208,8 @@ HTML_TEMPLATE = """
         <div class="logo">⚡ RIDER</div>
         <div class="nav-links">
             <a href="/join-captain" class="nav-btn nav-btn-join">➕ Join Captain</a>
-            <a href="/captain" class="nav-btn">🛵 Captain</a>
-            <a href="/admin" class="nav-btn" style="background:#fbbf24; color:#000;">📊 Admin</a>
+            <a href="/captain" class="nav-btn">🛵 Captain Login</a>
+            <a href="/admin" class="nav-btn" style="background:#fbbf24; color:#000;">📊 Admin Login</a>
             <div class="owner-tag">{{ owner }}</div>
         </div>
     </header>
@@ -767,7 +814,7 @@ ADMIN_TEMPLATE = """
     <div class="header">
         <h1>⚡ RIDER - Admin Control Console</h1>
         <div>
-            <a href="/captain" class="btn-home" style="margin-right: 8px; background: #059669; color: white;">🛵 Captain Panel</a>
+            <a href="/logout" class="btn-home" style="background:#f43f5e; color:white;">Logout 🚪</a>
             <a href="/" class="btn-home">⬅ Back to Booking</a>
         </div>
     </div>
@@ -894,9 +941,9 @@ CAPTAIN_TEMPLATE = """
 </head>
 <body>
     <div class="header">
-        <h1>🛵 Captain Live Orders Dashboard</h1>
+        <h1>🛵 Welcome Captain: {{ captain_name }}</h1>
         <div>
-            <a href="/admin" class="btn-home" style="margin-right: 8px; background: #1f2937; color: #fbbf24; border: 1px solid #374151;">📊 Admin Panel</a>
+            <a href="/logout" class="btn-home" style="background:#f43f5e; color:white;">Logout 🚪</a>
             <a href="/" class="btn-home">⬅ Back to Booking</a>
         </div>
     </div>
@@ -976,6 +1023,231 @@ CAPTAIN_TEMPLATE = """
 @app.route("/")
 def home():
     return render_template_string(HTML_TEMPLATE, owner=OWNER_NAME, upi_id=OWNER_UPI_ID)
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/")
+
+@app.route("/admin", methods=["GET", "POST"])
+def admin_dashboard():
+    error = None
+    if request.method == "POST":
+        pwd = request.form.get("password")
+        if pwd == ADMIN_PASSWORD:
+            session["is_admin"] = True
+        else:
+            error = "Invalid Secret Password!"
+
+    if not session.get("is_admin"):
+        return render_template_string(LOGIN_FORM_HTML, role="Admin", error=error)
+
+    init_excel()
+    wb_bookings = load_workbook(EXCEL_FILE)
+    ws_bookings = wb_bookings["Bookings"]
+    all_bookings = list(ws_bookings.iter_rows(values_only=True))
+
+    bookings_data = []
+    total_gross_earnings = 0
+    total_admin_commission = 0
+    total_captain_payout = 0
+
+    for row in all_bookings[1:]:
+        fare_raw = str(row[5]).replace("₹", "").split("(")[0].strip() if len(row) > 5 else "0"
+        try:
+            fare_num = int(fare_raw)
+        except ValueError:
+            fare_num = 0
+        
+        admin_commission = int(fare_num * 0.20)
+        captain_payout = fare_num - admin_commission
+
+        if len(row) > 8 and row[8] == "Completed":
+            total_gross_earnings += fare_num
+            total_admin_commission += admin_commission
+            total_captain_payout += captain_payout
+
+        bookings_data.append((fare_num, admin_commission, captain_payout, row))
+
+    wb_captains = load_workbook(CAPTAINS_FILE)
+    ws_captains = wb_captains["Captains"]
+    all_captains = list(ws_captains.iter_rows(values_only=True))
+    captains_with_index = [(i, row) for i, row in enumerate(all_captains[1:])]
+
+    return render_template_string(ADMIN_TEMPLATE, 
+                                 bookings_data=bookings_data, 
+                                 total_gross_earnings=total_gross_earnings,
+                                 total_admin_commission=total_admin_commission,
+                                 total_captain_payout=total_captain_payout,
+                                 captains_with_index=captains_with_index)
+
+@app.route("/captain", methods=["GET", "POST"])
+def captain_dashboard():
+    error = None
+    if request.method == "POST":
+        phone = request.form.get("phone", "").strip()
+        init_excel()
+        wb = load_workbook(CAPTAINS_FILE)
+        ws = wb["Captains"]
+        captains = list(ws.iter_rows(values_only=True))
+        
+        valid_captain = None
+        for cap in captains[1:]:
+            if str(cap[1]).strip() == phone and cap[5] == "Approved":
+                valid_captain = cap
+                break
+        
+        if valid_captain:
+            session["captain_phone"] = phone
+            session["captain_name"] = valid_captain[0]
+        else:
+            error = "Captain Phone not registered OR Registration Pending Approval!"
+
+    if not session.get("captain_phone"):
+        return render_template_string(LOGIN_FORM_HTML, role="Captain", error=error)
+
+    init_excel()
+    wb = load_workbook(EXCEL_FILE)
+    ws = wb["Bookings"]
+    all_rows = list(ws.iter_rows(values_only=True))
+    
+    bookings_data = []
+    completed_count = 0
+    total_captain_net = 0
+    total_admin_cut = 0
+
+    for i, row in enumerate(all_rows[1:]):
+        fare_raw = str(row[5]).replace("₹", "").split("(")[0].strip() if len(row) > 5 else "0"
+        try:
+            fare_num = int(fare_raw)
+        except ValueError:
+            fare_num = 0
+        
+        admin_commission = int(fare_num * 0.20)
+        captain_payout = fare_num - admin_commission
+
+        if len(row) > 8 and row[8] == "Completed":
+            completed_count += 1
+            total_captain_net += captain_payout
+            total_admin_cut += admin_commission
+
+        bookings_data.append((fare_num, admin_commission, captain_payout, i, row))
+
+    return render_template_string(CAPTAIN_TEMPLATE, bookings_data=bookings_data, completed_count=completed_count, total_captain_net=total_captain_net, total_admin_cut=total_admin_cut, captain_name=session.get("captain_name"))
+
+@app.route("/captain/accept/<int:index>")
+def captain_accept(index):
+    if not session.get("captain_phone"):
+        return redirect("/captain")
+    init_excel()
+    wb = load_workbook(EXCEL_FILE)
+    ws = wb["Bookings"]
+    row_num = index + 2
+    if row_num <= ws.max_row:
+        ws.cell(row=row_num, column=8, value=session.get("captain_name", "Mukesh Kumar"))
+        ws.cell(row=row_num, column=9, value="Accepted")
+        wb.save(EXCEL_FILE)
+    return redirect("/captain")
+
+@app.route("/captain/complete/<int:index>")
+def captain_complete(index):
+    if not session.get("captain_phone"):
+        return redirect("/captain")
+    init_excel()
+    wb = load_workbook(EXCEL_FILE)
+    ws = wb["Bookings"]
+    row_num = index + 2
+    if row_num <= ws.max_row:
+        ws.cell(row=row_num, column=9, value="Completed")
+        wb.save(EXCEL_FILE)
+    return redirect("/captain")
+
+@app.route("/admin/approve-captain/<int:index>")
+def approve_captain(index):
+    if not session.get("is_admin"):
+        return redirect("/admin")
+    init_excel()
+    wb = load_workbook(CAPTAINS_FILE)
+    ws = wb["Captains"]
+    row_num = index + 2
+    if row_num <= ws.max_row:
+        ws.cell(row=row_num, column=6, value="Approved")
+        wb.save(CAPTAINS_FILE)
+    return redirect("/admin")
+
+@app.route("/join-captain")
+def join_captain_page():
+    return render_template_string("""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Join as Captain - Rider</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { background-color: #030712; color: #f9fafb; padding: 20px; }
+        .header { display: flex; justify-content: space-between; align-items: center; background: #111827; color: #fbbf24; padding: 15px 25px; border-radius: 12px; margin-bottom: 20px; border: 1px solid rgba(255,255,255,0.08); }
+        .btn-home { background: #fbbf24; color: #000; padding: 8px 15px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px; }
+        .card { background: #111827; border-radius: 14px; padding: 25px; max-width: 500px; margin: 0 auto; border: 1px solid rgba(255,255,255,0.08); }
+        h2 { margin-bottom: 8px; color: #f9fafb; }
+        .sub { font-size: 12px; color: #9ca3af; margin-bottom: 20px; }
+        .input-group { margin-bottom: 15px; }
+        label { font-size: 11px; font-weight: 800; color: #9ca3af; display: block; margin-bottom: 5px; text-transform: uppercase; }
+        input { width: 100%; padding: 12px; border: 1px solid #1f2937; border-radius: 8px; font-size: 14px; outline: none; background: #030712; color: #fff; }
+        .btn-submit { width: 100%; background: #059669; color: white; border: none; padding: 14px; font-size: 15px; font-weight: bold; border-radius: 8px; cursor: pointer; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🛵 RIDER - Captain Partner Program</h1>
+        <a href="/" class="btn-home">⬅ Back to Home</a>
+    </div>
+    <div class="card">
+        <h2>Register as a Captain</h2>
+        <div class="sub">Fill your details & vehicle documents to start earning.</div>
+        <form action="/api/register-captain" method="POST">
+            <div class="input-group">
+                <label>Full Name</label>
+                <input type="text" name="name" required placeholder="Enter full name">
+            </div>
+            <div class="input-group">
+                <label>Mobile Number</label>
+                <input type="tel" name="phone" required placeholder="10-digit mobile number" maxlength="10">
+            </div>
+            <div class="input-group">
+                <label>Bike Model</label>
+                <input type="text" name="bike_model" required placeholder="e.g. Hero Splendor">
+            </div>
+            <div class="input-group">
+                <label>Vehicle Number</label>
+                <input type="text" name="vehicle_no" required placeholder="e.g. UP 16 AB 1234">
+            </div>
+            <div class="input-group">
+                <label>Licence / ID Number</label>
+                <input type="text" name="doc_id" required placeholder="Enter Driving Licence / Aadhaar">
+            </div>
+            <button type="submit" class="btn-submit">Submit Registration</button>
+        </form>
+    </div>
+</body>
+</html>
+""")
+
+@app.route("/api/register-captain", methods=["POST"])
+def register_captain():
+    name = request.form.get("name")
+    phone = request.form.get("phone")
+    bike_model = request.form.get("bike_model")
+    vehicle_no = request.form.get("vehicle_no")
+    doc_id = request.form.get("doc_id")
+    
+    init_excel()
+    wb = load_workbook(CAPTAINS_FILE)
+    ws = wb["Captains"]
+    ws.append([name, phone, bike_model, vehicle_no, doc_id, "Pending", "₹0", "5.0 ⭐"])
+    wb.save(CAPTAINS_FILE)
+    return "<script>alert('⏳ Registration Submitted! Admin verification required.');window.location.href='/';</script>"
 
 @app.route("/api/proxy-search")
 def proxy_search():
@@ -1094,186 +1366,6 @@ def api_submit_rating():
         wb.save(EXCEL_FILE)
         return jsonify({"status": "success"})
     return jsonify({"status": "failed"})
-
-@app.route("/captain")
-def captain_dashboard():
-    init_excel()
-    wb = load_workbook(EXCEL_FILE)
-    ws = wb["Bookings"]
-    all_rows = list(ws.iter_rows(values_only=True))
-    
-    bookings_data = []
-    completed_count = 0
-    total_captain_net = 0
-    total_admin_cut = 0
-
-    for i, row in enumerate(all_rows[1:]):
-        fare_raw = str(row[5]).replace("₹", "").split("(")[0].strip() if len(row) > 5 else "0"
-        try:
-            fare_num = int(fare_raw)
-        except ValueError:
-            fare_num = 0
-        
-        admin_commission = int(fare_num * 0.20)
-        captain_payout = fare_num - admin_commission
-
-        if len(row) > 8 and row[8] == "Completed":
-            completed_count += 1
-            total_captain_net += captain_payout
-            total_admin_cut += admin_commission
-
-        bookings_data.append((fare_num, admin_commission, captain_payout, i, row))
-
-    return render_template_string(CAPTAIN_TEMPLATE, bookings_data=bookings_data, completed_count=completed_count, total_captain_net=total_captain_net, total_admin_cut=total_admin_cut)
-
-@app.route("/captain/accept/<int:index>")
-def captain_accept(index):
-    init_excel()
-    wb = load_workbook(EXCEL_FILE)
-    ws = wb["Bookings"]
-    row_num = index + 2
-    if row_num <= ws.max_row:
-        ws.cell(row=row_num, column=8, value="Mukesh Kumar")
-        ws.cell(row=row_num, column=9, value="Accepted")
-        wb.save(EXCEL_FILE)
-    return redirect("/captain")
-
-@app.route("/captain/complete/<int:index>")
-def captain_complete(index):
-    init_excel()
-    wb = load_workbook(EXCEL_FILE)
-    ws = wb["Bookings"]
-    row_num = index + 2
-    if row_num <= ws.max_row:
-        ws.cell(row=row_num, column=9, value="Completed")
-        wb.save(EXCEL_FILE)
-    return redirect("/captain")
-
-@app.route("/admin")
-def admin_dashboard():
-    init_excel()
-    wb_bookings = load_workbook(EXCEL_FILE)
-    ws_bookings = wb_bookings["Bookings"]
-    all_bookings = list(ws_bookings.iter_rows(values_only=True))
-
-    bookings_data = []
-    total_gross_earnings = 0
-    total_admin_commission = 0
-    total_captain_payout = 0
-
-    for row in all_bookings[1:]:
-        fare_raw = str(row[5]).replace("₹", "").split("(")[0].strip() if len(row) > 5 else "0"
-        try:
-            fare_num = int(fare_raw)
-        except ValueError:
-            fare_num = 0
-        
-        admin_commission = int(fare_num * 0.20)
-        captain_payout = fare_num - admin_commission
-
-        if len(row) > 8 and row[8] == "Completed":
-            total_gross_earnings += fare_num
-            total_admin_commission += admin_commission
-            total_captain_payout += captain_payout
-
-        bookings_data.append((fare_num, admin_commission, captain_payout, row))
-
-    wb_captains = load_workbook(CAPTAINS_FILE)
-    ws_captains = wb_captains["Captains"]
-    all_captains = list(ws_captains.iter_rows(values_only=True))
-    captains_with_index = [(i, row) for i, row in enumerate(all_captains[1:])]
-
-    return render_template_string(ADMIN_TEMPLATE, 
-                                 bookings_data=bookings_data, 
-                                 total_gross_earnings=total_gross_earnings,
-                                 total_admin_commission=total_admin_commission,
-                                 total_captain_payout=total_captain_payout,
-                                 captains_with_index=captains_with_index)
-
-@app.route("/admin/approve-captain/<int:index>")
-def approve_captain(index):
-    init_excel()
-    wb = load_workbook(CAPTAINS_FILE)
-    ws = wb["Captains"]
-    row_num = index + 2
-    if row_num <= ws.max_row:
-        ws.cell(row=row_num, column=6, value="Approved")
-        wb.save(CAPTAINS_FILE)
-    return redirect("/admin")
-
-@app.route("/join-captain")
-def join_captain_page():
-    return render_template_string("""
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Join as Captain - Rider</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        body { background-color: #030712; color: #f9fafb; padding: 20px; }
-        .header { display: flex; justify-content: space-between; align-items: center; background: #111827; color: #fbbf24; padding: 15px 25px; border-radius: 12px; margin-bottom: 20px; border: 1px solid rgba(255,255,255,0.08); }
-        .btn-home { background: #fbbf24; color: #000; padding: 8px 15px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px; }
-        .card { background: #111827; border-radius: 14px; padding: 25px; max-width: 500px; margin: 0 auto; border: 1px solid rgba(255,255,255,0.08); }
-        h2 { margin-bottom: 8px; color: #f9fafb; }
-        .sub { font-size: 12px; color: #9ca3af; margin-bottom: 20px; }
-        .input-group { margin-bottom: 15px; }
-        label { font-size: 11px; font-weight: 800; color: #9ca3af; display: block; margin-bottom: 5px; text-transform: uppercase; }
-        input { width: 100%; padding: 12px; border: 1px solid #1f2937; border-radius: 8px; font-size: 14px; outline: none; background: #030712; color: #fff; }
-        .btn-submit { width: 100%; background: #059669; color: white; border: none; padding: 14px; font-size: 15px; font-weight: bold; border-radius: 8px; cursor: pointer; margin-top: 10px; }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>🛵 RIDER - Captain Partner Program</h1>
-        <a href="/" class="btn-home">⬅ Back to Home</a>
-    </div>
-    <div class="card">
-        <h2>Register as a Captain</h2>
-        <div class="sub">Fill your details & vehicle documents to start earning.</div>
-        <form action="/api/register-captain" method="POST">
-            <div class="input-group">
-                <label>Full Name</label>
-                <input type="text" name="name" required placeholder="Enter full name">
-            </div>
-            <div class="input-group">
-                <label>Mobile Number</label>
-                <input type="tel" name="phone" required placeholder="10-digit mobile number" maxlength="10">
-            </div>
-            <div class="input-group">
-                <label>Bike Model</label>
-                <input type="text" name="bike_model" required placeholder="e.g. Hero Splendor">
-            </div>
-            <div class="input-group">
-                <label>Vehicle Number</label>
-                <input type="text" name="vehicle_no" required placeholder="e.g. UP 16 AB 1234">
-            </div>
-            <div class="input-group">
-                <label>Licence / ID Number</label>
-                <input type="text" name="doc_id" required placeholder="Enter Driving Licence / Aadhaar">
-            </div>
-            <button type="submit" class="btn-submit">Submit Registration</button>
-        </form>
-    </div>
-</body>
-</html>
-""")
-
-@app.route("/api/register-captain", methods=["POST"])
-def register_captain():
-    name = request.form.get("name")
-    phone = request.form.get("phone")
-    bike_model = request.form.get("bike_model")
-    vehicle_no = request.form.get("vehicle_no")
-    doc_id = request.form.get("doc_id")
-    
-    init_excel()
-    wb = load_workbook(CAPTAINS_FILE)
-    ws = wb["Captains"]
-    ws.append([name, phone, bike_model, vehicle_no, doc_id, "Pending", "₹0", "5.0 ⭐"])
-    wb.save(CAPTAINS_FILE)
-    return "<script>alert('⏳ Registration Submitted! Admin verification required.');window.location.href='/admin';</script>"
 
 if __name__ == "__main__":
     init_excel()
