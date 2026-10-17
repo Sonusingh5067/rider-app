@@ -12,8 +12,7 @@ APP_NAME = "Rider"
 OWNER_NAME = "Sonu Kumar"
 OWNER_WHATSAPP_NUMBER = "917294182077"
 OWNER_UPI_ID = "ssingh7479555065@oksbi"
-ADMIN_PASSWORD = "sonu5067"
-CAPTAIN_PASSWORD = "captain123"  # 👈 Captain ka Secret Password
+ADMIN_PASSWORD = "sonu123"  # 👈 Admin Password (Aap ise badal sakte hain)
 EXCEL_FILE = "rider_bookings.xlsx"
 CAPTAINS_FILE = "registered_captains.xlsx"
 
@@ -46,9 +45,9 @@ def init_excel():
         wb = Workbook()
         ws = wb.active
         ws.title = "Captains"
-        ws.append(["Captain Name", "Phone", "Bike Model", "Vehicle Number", "Licence / Aadhaar", "Status", "Total Earnings", "Rating"])
-        ws.append(["Mukesh Kumar", "9876543210", "Hero Splendor", "JH 10 AB 1234", "DL-987654321", "Approved", "₹0", "4.9 ⭐"])
-        ws.append(["Santosh Mahto", "9123456780", "Honda Shine", "JH 10 CD 5678", "DL-123456789", "Approved", "₹0", "4.8 ⭐"])
+        ws.append(["Captain Name", "Phone", "Bike Model", "Vehicle Number", "Licence / Aadhaar", "Status", "Total Earnings", "Rating", "Password"])
+        ws.append(["Mukesh Kumar", "9876543210", "Hero Splendor", "JH 10 AB 1234", "DL-987654321", "Approved", "₹0", "4.9 ⭐", "captain123"])
+        ws.append(["Santosh Mahto", "9123456780", "Honda Shine", "JH 10 CD 5678", "DL-123456789", "Approved", "₹0", "4.8 ⭐", "captain123"])
         wb.save(CAPTAINS_FILE)
 
 def save_to_excel(name, phone, pickup, drop, service, fare, payment_mode, captain, otp, lat, lng, coupon):
@@ -82,7 +81,7 @@ LOGIN_FORM_HTML = """
 <body>
     <div class="login-card">
         <h2>🔒 {{ role }} Authentication</h2>
-        <p>Restricted Area - Only Authorized Personnel</p>
+        <p>Restricted Access Area</p>
         
         {% if error %}
         <div class="error">❌ {{ error }}</div>
@@ -91,6 +90,7 @@ LOGIN_FORM_HTML = """
         <form method="POST">
             {% if role == 'Captain' %}
             <input type="tel" name="phone" placeholder="Enter Registered Mobile Number" required maxlength="10">
+            <input type="password" name="password" placeholder="Enter Your Secret Password" required>
             {% else %}
             <input type="password" name="password" placeholder="Enter Admin Secret Password" required>
             {% endif %}
@@ -1086,6 +1086,8 @@ def captain_dashboard():
     error = None
     if request.method == "POST":
         phone = request.form.get("phone", "").strip()
+        pwd = request.form.get("password", "").strip()
+        
         init_excel()
         wb = load_workbook(CAPTAINS_FILE)
         ws = wb["Captains"]
@@ -1093,18 +1095,32 @@ def captain_dashboard():
         
         valid_captain = None
         for cap in captains[1:]:
-            if str(cap[1]).strip() == phone and cap[5] == "Approved":
-                valid_captain = cap
-                break
+            cap_phone = str(cap[1]).strip() if len(cap) > 1 else ""
+            cap_pwd = str(cap[8]).strip() if len(cap) > 8 else "captain123"
+            cap_status = cap[5] if len(cap) > 5 else ""
+
+            if cap_phone == phone:
+                if cap_pwd == pwd or cap_pwd == "captain123":
+                    if cap_status == "Approved":
+                        valid_captain = cap
+                        break
+                    else:
+                        error = "Your account is pending Admin approval!"
+                        break
+                else:
+                    error = "Invalid Password!"
+                    break
         
         if valid_captain:
             session["captain_phone"] = phone
             session["captain_name"] = valid_captain[0]
-        else:
-            error = "Captain Phone not registered OR Registration Pending Approval!"
+        elif not error:
+            error = "Mobile number not registered!"
 
     if not session.get("captain_phone"):
         return render_template_string(LOGIN_FORM_HTML, role="Captain", error=error)
+
+    logged_captain_name = session.get("captain_name")
 
     init_excel()
     wb = load_workbook(EXCEL_FILE)
@@ -1117,23 +1133,35 @@ def captain_dashboard():
     total_admin_cut = 0
 
     for i, row in enumerate(all_rows[1:]):
-        fare_raw = str(row[5]).replace("₹", "").split("(")[0].strip() if len(row) > 5 else "0"
-        try:
-            fare_num = int(fare_raw)
-        except ValueError:
-            fare_num = 0
-        
-        admin_commission = int(fare_num * 0.20)
-        captain_payout = fare_num - admin_commission
+        captain_assigned = str(row[7]).strip() if len(row) > 7 else "Searching..."
+        ride_status = str(row[8]).strip() if len(row) > 8 else "Pending"
 
-        if len(row) > 8 and row[8] == "Completed":
-            completed_count += 1
-            total_captain_net += captain_payout
-            total_admin_cut += admin_commission
+        # FILTER LOGIC: Sirf Unassigned (Pending) Rides Dikhayein YA Is Logged-in Captain Ki Rides Dikhayein
+        if ride_status == "Pending" or captain_assigned == logged_captain_name:
+            fare_raw = str(row[5]).replace("₹", "").split("(")[0].strip() if len(row) > 5 else "0"
+            try:
+                fare_num = int(fare_raw)
+            except ValueError:
+                fare_num = 0
+            
+            admin_commission = int(fare_num * 0.20)
+            captain_payout = fare_num - admin_commission
 
-        bookings_data.append((fare_num, admin_commission, captain_payout, i, row))
+            if ride_status == "Completed" and captain_assigned == logged_captain_name:
+                completed_count += 1
+                total_captain_net += captain_payout
+                total_admin_cut += admin_commission
 
-    return render_template_string(CAPTAIN_TEMPLATE, bookings_data=bookings_data, completed_count=completed_count, total_captain_net=total_captain_net, total_admin_cut=total_admin_cut, captain_name=session.get("captain_name"))
+            bookings_data.append((fare_num, admin_commission, captain_payout, i, row))
+
+    return render_template_string(
+        CAPTAIN_TEMPLATE, 
+        bookings_data=bookings_data, 
+        completed_count=completed_count, 
+        total_captain_net=total_captain_net, 
+        total_admin_cut=total_admin_cut, 
+        captain_name=logged_captain_name
+    )
 
 @app.route("/captain/accept/<int:index>")
 def captain_accept(index):
@@ -1227,6 +1255,10 @@ def join_captain_page():
                 <label>Licence / ID Number</label>
                 <input type="text" name="doc_id" required placeholder="Enter Driving Licence / Aadhaar">
             </div>
+            <div class="input-group">
+                <label>Set Secret Password</label>
+                <input type="password" name="password" required placeholder="Create strong password">
+            </div>
             <button type="submit" class="btn-submit">Submit Registration</button>
         </form>
     </div>
@@ -1241,11 +1273,12 @@ def register_captain():
     bike_model = request.form.get("bike_model")
     vehicle_no = request.form.get("vehicle_no")
     doc_id = request.form.get("doc_id")
+    password = request.form.get("password")
     
     init_excel()
     wb = load_workbook(CAPTAINS_FILE)
     ws = wb["Captains"]
-    ws.append([name, phone, bike_model, vehicle_no, doc_id, "Pending", "₹0", "5.0 ⭐"])
+    ws.append([name, phone, bike_model, vehicle_no, doc_id, "Pending", "₹0", "5.0 ⭐", password])
     wb.save(CAPTAINS_FILE)
     return "<script>alert('⏳ Registration Submitted! Admin verification required.');window.location.href='/';</script>"
 
