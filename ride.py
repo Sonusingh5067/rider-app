@@ -6,13 +6,13 @@ from flask import Flask, render_template_string, request, jsonify, redirect, ses
 from openpyxl import Workbook, load_workbook
 
 app = Flask(__name__)
-app.secret_key = "rider_secret_key_sonu_5067"  # Session security key
+app.secret_key = "rider_secret_key_sonu_5067"
 
 APP_NAME = "Rider"
 OWNER_NAME = "Sonu Kumar"
 OWNER_WHATSAPP_NUMBER = "917294182077"
 OWNER_UPI_ID = "ssingh7479555065@oksbi"
-ADMIN_PASSWORD = "sonu123"  # 👈 Admin Password (Aap ise badal sakte hain)
+ADMIN_PASSWORD = "admin123"
 EXCEL_FILE = "rider_bookings.xlsx"
 CAPTAINS_FILE = "registered_captains.xlsx"
 
@@ -325,7 +325,7 @@ HTML_TEMPLATE = """
         <div class="modal-content">
             <div id="searchingState">
                 <div class="radar-box"><div style="font-size: 30px;">⚡</div></div>
-                <h3 id="searchStatusText" style="font-size: 15px; color: #f9fafb;">Looking for available Captains...</h3>
+                <h3 id="searchStatusText" style="font-size: 15px; color: #f9fafb;">Broadcasting Request to All Active Captains...</h3>
                 <p style="font-size: 11px; color: #9ca3af; margin-top: 6px;">Please wait while a Captain accepts your ride request.</p>
             </div>
             
@@ -808,6 +808,8 @@ ADMIN_TEMPLATE = """
         .btn-status-approved { padding: 4px 10px; border-radius: 6px; font-weight: bold; font-size: 11px; color: white; background: #059669; }
         .btn-status-pending { padding: 4px 10px; border-radius: 6px; font-weight: bold; font-size: 11px; color: white; background: #eab308; }
         .btn-approve-act { padding: 6px 12px; border-radius: 6px; font-weight: bold; font-size: 11px; color: white; background: #0284c7; text-decoration: none; display: inline-block; }
+        .broadcast-badge { background: rgba(234, 179, 8, 0.15); color: #fbbf24; border: 1px solid #eab308; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: bold; }
+        .assigned-badge { background: rgba(5, 150, 105, 0.15); color: #34d399; border: 1px solid #059669; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -877,7 +879,7 @@ ADMIN_TEMPLATE = """
     </div>
 
     <div class="card">
-        <h2>📊 Live Ride Bookings & Commission Breakdown</h2>
+        <h2>📊 Live Ride Requests Dispatch & Commission Tracking</h2>
         <table>
             <thead>
                 <tr>
@@ -886,9 +888,9 @@ ADMIN_TEMPLATE = """
                     <th>Fare Paid</th>
                     <th>Admin (20%)</th>
                     <th>Rider (80%)</th>
-                    <th>Captain</th>
+                    <th>Target Dispatched Captains</th>
+                    <th>Assigned Captain</th>
                     <th>OTP</th>
-                    <th>Rating</th>
                     <th>Status</th>
                 </tr>
             </thead>
@@ -900,9 +902,15 @@ ADMIN_TEMPLATE = """
                     <td><b style="color:#fff;">₹{{ fare_num }}</b></td>
                     <td><b style="color:#fbbf24;">₹{{ admin_c }}</b></td>
                     <td><b style="color:#34d399;">₹{{ captain_p }}</b></td>
+                    <td>
+                        {% if row[8] == 'Pending' %}
+                        <span class="broadcast-badge">📢 All Active Captains (Broadcast)</span>
+                        {% else %}
+                        <span class="assigned-badge">🎯 Claimed by {{ row[7] }}</span>
+                        {% endif %}
+                    </td>
                     <td><b>{{ row[7] if row|length > 7 else 'Searching...' }}</b></td>
                     <td><b style="color: #38bdf8;">{{ row[9] if row|length > 9 else '----' }}</b></td>
-                    <td><b style="color: #fbbf24;">{{ row[12] if row|length > 12 else 'Not Rated' }}</b></td>
                     <td><span style="font-weight: bold; {% if row|length > 8 and row[8] == 'Accepted' %}color: #fbbf24;{% elif row|length > 8 and row[8] == 'Completed' %}color: #34d399;{% else %}color: #f43f5e;{% endif %}">{{ row[8] if row|length > 8 else 'Pending' }}</span></td>
                 </tr>
                 {% endfor %}
@@ -920,7 +928,6 @@ CAPTAIN_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Captain Operations Console</title>
-    <meta http-equiv="refresh" content="6">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background-color: #030712; color: #f9fafb; padding: 20px; }
@@ -937,6 +944,9 @@ CAPTAIN_TEMPLATE = """
         .btn-action { padding: 6px 12px; border-radius: 6px; font-weight: bold; font-size: 12px; border: none; cursor: pointer; color: white; text-decoration: none; }
         .btn-accept { background: #059669; }
         .btn-complete { background: #0284c7; }
+        
+        .alert-banner { display: none; background: #fbbf24; color: #000; padding: 15px; border-radius: 10px; font-weight: 800; font-size: 14px; margin-bottom: 20px; text-align: center; border: 2px dashed #000; animation: pulse 1s infinite; }
+        @keyframes pulse { 0% { transform: scale(0.99); } 50% { transform: scale(1.01); } 100% { transform: scale(0.99); } }
     </style>
 </head>
 <body>
@@ -946,6 +956,10 @@ CAPTAIN_TEMPLATE = """
             <a href="/logout" class="btn-home" style="background:#f43f5e; color:white;">Logout 🚪</a>
             <a href="/" class="btn-home">⬅ Back to Booking</a>
         </div>
+    </div>
+
+    <div id="liveAlertBanner" class="alert-banner">
+        🔔 NAYI RIDE REQUEST AAYI HAI! PLEASE CHECK & ACCEPT BELOW ⚡
     </div>
 
     <div class="stats-grid">
@@ -1007,6 +1021,29 @@ CAPTAIN_TEMPLATE = """
     </div>
 
     <script>
+        let lastPendingCount = {{ pending_count }};
+
+        function checkLiveRequests() {
+            fetch('/api/check-pending-count')
+            .then(res => res.json())
+            .then(data => {
+                if (data.pending_count > lastPendingCount) {
+                    document.getElementById('liveAlertBanner').style.display = 'block';
+                    try {
+                        let audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+                        audio.play();
+                    } catch(e) {}
+                    
+                    setTimeout(() => {
+                        location.reload();
+                    }, 2000);
+                }
+                lastPendingCount = data.pending_count;
+            });
+        }
+
+        setInterval(checkLiveRequests, 3500);
+
         function completeRide(index, correctOtp) {
             const entered = document.getElementById('otp_' + index).value.trim();
             if (entered !== correctOtp) {
@@ -1131,12 +1168,15 @@ def captain_dashboard():
     completed_count = 0
     total_captain_net = 0
     total_admin_cut = 0
+    pending_count = 0
 
     for i, row in enumerate(all_rows[1:]):
         captain_assigned = str(row[7]).strip() if len(row) > 7 else "Searching..."
         ride_status = str(row[8]).strip() if len(row) > 8 else "Pending"
 
-        # FILTER LOGIC: Sirf Unassigned (Pending) Rides Dikhayein YA Is Logged-in Captain Ki Rides Dikhayein
+        if ride_status == "Pending":
+            pending_count += 1
+
         if ride_status == "Pending" or captain_assigned == logged_captain_name:
             fare_raw = str(row[5]).replace("₹", "").split("(")[0].strip() if len(row) > 5 else "0"
             try:
@@ -1160,8 +1200,18 @@ def captain_dashboard():
         completed_count=completed_count, 
         total_captain_net=total_captain_net, 
         total_admin_cut=total_admin_cut, 
-        captain_name=logged_captain_name
+        captain_name=logged_captain_name,
+        pending_count=pending_count
     )
+
+@app.route("/api/check-pending-count")
+def api_check_pending_count():
+    init_excel()
+    wb = load_workbook(EXCEL_FILE)
+    ws = wb["Bookings"]
+    all_rows = list(ws.iter_rows(values_only=True))
+    p_count = sum(1 for row in all_rows[1:] if len(row) > 8 and row[8] == "Pending")
+    return jsonify({"pending_count": p_count})
 
 @app.route("/captain/accept/<int:index>")
 def captain_accept(index):
